@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Artist Hub</title>
+  <meta name="description" content="Statistiken aus Spotify for Artists, SoundCloud, TikTok und Instagram an einem Ort.">
+  <meta name="theme-color" content="#121211">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Artist Hub">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Artist Hub</h1>
+    <div class="range" role="group" aria-label="Zeitraum">
+      <button data-range="7">7 T</button>
+      <button data-range="28" class="active">28 T</button>
+      <button data-range="90">90 T</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ÜBERSICHT -->
+    <section id="view-overview" class="view active" aria-label="Übersicht">
+      <div id="empty-state" class="card empty" hidden>
+        <h2>Noch keine Daten</h2>
+        <p>Trag deine aktuellen Zahlen ein oder importier einen CSV-Export (z.&nbsp;B. aus Spotify for Artists).</p>
+        <div class="row">
+          <button class="btn primary" data-goto="data">Daten eintragen</button>
+          <button class="btn" id="btn-demo">Demo-Daten laden</button>
+        </div>
+      </div>
+
+      <div id="overview-content">
+        <div class="card hero">
+          <div class="hero-label">Follower gesamt <span class="hint" title="Summe über alle Plattformen – eine Person, die dir auf zwei Plattformen folgt, zählt doppelt.">ⓘ</span></div>
+          <div class="hero-value" id="hero-followers">–</div>
+          <div class="hero-delta" id="hero-delta"></div>
+        </div>
+
+        <div class="tiles" id="platform-tiles"></div>
+
+        <div class="card">
+          <h2>Follower-Wachstum</h2>
+          <p class="sub">in % seit Beginn des Zeitraums – macht Plattformen unterschiedlicher Größe vergleichbar</p>
+          <div class="chart" id="chart-growth"></div>
+          <div class="legend" id="legend-growth"></div>
+        </div>
+
+        <div class="card">
+          <h2>Wiedergaben im Zeitraum</h2>
+          <p class="sub">Achtung: ein TikTok-View (ab ~1&nbsp;s) ist kein Spotify-Stream (ab 30&nbsp;s). Nicht gegeneinander aufrechnen.</p>
+          <div id="plays-bars"></div>
+        </div>
+
+        <div class="card">
+          <h2>Auffälligkeiten</h2>
+          <ul class="insights" id="insights"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- PLATTFORMEN -->
+    <section id="view-platforms" class="view" aria-label="Plattformen">
+      <div class="seg" id="platform-switch" role="tablist"></div>
+      <div id="platform-detail"></div>
+    </section>
+
+    <!-- DATEN -->
+    <section id="view-data" class="view" aria-label="Daten">
+      <div class="card">
+        <h2>Werte eintragen</h2>
+        <p class="sub">Bestandswerte (z.&nbsp;B. Follower) = aktueller Stand. Tageswerte (z.&nbsp;B. Streams) = Menge an genau diesem Tag.</p>
+        <form id="entry-form">
+          <div class="row">
+            <label class="field">Plattform
+              <select id="entry-platform"></select>
+            </label>
+            <label class="field">Datum
+              <input type="date" id="entry-date" required>
+            </label>
+          </div>
+          <div id="entry-fields" class="fields"></div>
+          <button class="btn primary" type="submit">Speichern</button>
+          <span class="status" id="entry-status" role="status"></span>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>CSV importieren</h2>
+        <p class="sub">Spotify for Artists: Musik → Zeitraum wählen → Export (CSV). TikTok & Instagram: Export aus den Insights bzw. aus Tools wie Metricool. Spalten werden automatisch erkannt, du kannst sie anpassen.</p>
+        <div class="row">
+          <label class="field">Plattform
+            <select id="csv-platform"></select>
+          </label>
+          <label class="field">Datei
+            <input type="file" id="csv-file" accept=".csv,text/csv">
+          </label>
+        </div>
+        <div id="csv-mapping"></div>
+      </div>
+
+      <div class="card">
+        <h2>Gespeicherte Werte</h2>
+        <div class="row">
+          <label class="field">Plattform
+            <select id="table-platform"></select>
+          </label>
+        </div>
+        <div class="table-wrap" id="data-table"></div>
+      </div>
+
+      <div class="card">
+        <h2>Sicherung</h2>
+        <p class="sub">Deine Daten liegen nur auf diesem Gerät. Exportier regelmäßig ein Backup – Browser können Speicher löschen.</p>
+        <div class="row">
+          <button class="btn" id="btn-export">Backup exportieren</button>
+          <label class="btn">Backup importieren<input type="file" id="backup-file" accept=".json,application/json" hidden></label>
+          <button class="btn danger" id="btn-clear">Alles löschen</button>
+        </div>
+        <span class="status" id="backup-status" role="status"></span>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar" aria-label="Navigation">
+    <button data-view="overview" class="active"><span aria-hidden="true">◎</span>Übersicht</button>
+    <button data-view="platforms"><span aria-hidden="true">▤</span>Plattformen</button>
+    <button data-view="data"><span aria-hidden="true">＋</span>Daten</button>
+  </nav>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
