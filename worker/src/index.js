@@ -92,9 +92,22 @@ const form = (obj) => ({ method: 'POST', headers: { 'content-type': 'application
 // ---------------------------------------------------------------------------
 // Provider: Instagram (Instagram API mit Instagram Login, Creator-/Business-Konto)
 // ---------------------------------------------------------------------------
+// Zwei Modi:
+//  - "unified" (IG_CONFIG_ID gesetzt): neue Apps ab Okt. 2026. Facebook Login for Business mit Konfiguration,
+//    liefert ein System-User-Token ohne Ablauf; Aufrufe über graph.facebook.com.
+//  - "legacy": Instagram Login (instagram.com/oauth), für ältere Apps.
+const IG_VER = (env) => env.IG_GRAPH_VERSION || 'v25.0';
 const instagram = {
   configured: (env) => !!(env.IG_CLIENT_ID && env.IG_CLIENT_SECRET),
   authUrl(env, redirect, state) {
+    if (env.IG_CONFIG_ID) {
+      const u = new URL(`https://www.facebook.com/${IG_VER(env)}/dialog/oauth`);
+      u.search = new URLSearchParams({
+        client_id: env.IG_CLIENT_ID, redirect_uri: redirect, state, config_id: env.IG_CONFIG_ID,
+        response_type: 'code', override_default_response_type: 'true',
+      });
+      return u.toString();
+    }
     const u = new URL('https://www.instagram.com/oauth/authorize');
     u.search = new URLSearchParams({
       client_id: env.IG_CLIENT_ID, redirect_uri: redirect, response_type: 'code', state,
@@ -103,15 +116,36 @@ const instagram = {
     return u.toString();
   },
   async exchange(env, code, redirect) {
+    if (env.IG_CONFIG_ID) {
+      const base = `https://graph.facebook.com/${IG_VER(env)}`;
+      const r = await http(`${base}/oauth/access_token?${new URLSearchParams({
+        client_id: env.IG_CLIENT_ID, client_secret: env.IG_CLIENT_SECRET, redirect_uri: redirect, code,
+      })}`);
+      const t = encodeURIComponent(r.access_token);
+      let igId = '';
+      try {
+        const a = await http(`${base}/me/assigned_instagram_accounts?fields=id,username&access_token=${t}`);
+        igId = a.data?.[0]?.id || '';
+      } catch (e) { /* Fallback unten */ }
+      if (!igId) {
+        try {
+          const pages = await http(`${base}/me/accounts?fields=instagram_business_account&access_token=${t}`);
+          igId = (pages.data || []).map((p) => p.instagram_business_account?.id).find(Boolean) || '';
+        } catch (e) { /* egal */ }
+      }
+      if (!igId) throw new Error('Kein Instagram-Konto im Token gefunden. Prüfe: Konto im Business-Portfolio, Berechtigungen business_management + instagram_basic in der Konfiguration.');
+      return { mode: 'unified', access_token: r.access_token, ig_id: igId, expires_at: r.expires_in ? Date.now() + r.expires_in * 1000 : null };
+    }
     const short = await http('https://api.instagram.com/oauth/access_token', form({
       client_id: env.IG_CLIENT_ID, client_secret: env.IG_CLIENT_SECRET, grant_type: 'authorization_code', redirect_uri: redirect, code,
     }));
     const long = await http(`https://graph.instagram.com/access_token?${new URLSearchParams({
       grant_type: 'ig_exchange_token', client_secret: env.IG_CLIENT_SECRET, access_token: short.access_token,
     })}`);
-    return { access_token: long.access_token, expires_at: Date.now() + (long.expires_in || 5184000) * 1000, refreshed_at: Date.now(), user_id: String(short.user_id || '') };
+    return { mode: 'legacy', access_token: long.access_token, expires_at: Date.now() + (long.expires_in || 5184000) * 1000, refreshed_at: Date.now(), user_id: String(short.user_id || '') };
   },
   async refresh(env, tok) {
+    if (tok.mode === 'unified') return tok; // System-User-Token läuft nicht ab
     // Langzeit-Token gilt 60 Tage; wöchentlich verlängern
     if (Date.now() - (tok.refreshed_at || 0) < 7 * 86400000) return tok;
     const r = await http(`https://graph.instagram.com/refresh_access_token?${new URLSearchParams({ grant_type: 'ig_refresh_token', access_token: tok.access_token })}`);
@@ -119,11 +153,19 @@ const instagram = {
   },
   async fetch(env, tok, now) {
     const t = encodeURIComponent(tok.access_token);
-    const me = await http(`https://graph.instagram.com/me?fields=user_id,username,followers_count&access_token=${t}`);
-    const id = me.user_id || me.id;
+    let base, id, me;
+    if (tok.mode === 'unified') {
+      base = `https://graph.facebook.com/${IG_VER(env)}`;
+      id = tok.ig_id;
+      me = await http(`${base}/${id}?fields=username,followers_count&access_token=${t}`);
+    } else {
+      base = 'https://graph.instagram.com';
+      me = await http(`${base}/me?fields=user_id,username,followers_count&access_token=${t}`);
+      id = me.user_id || me.id;
+    }
     const today = localDate(now), yesterday = localDate(now, -1);
     const out = [{ m: 'followers', d: today, v: me.followers_count }];
-    const ins = await http(`https://graph.instagram.com/${id}/insights?${new URLSearchParams({
+    const ins = await http(`${base}/${id}/insights?${new URLSearchParams({
       metric: 'views,total_interactions', period: 'day', metric_type: 'total_value',
       since: String(localMidnight(yesterday)), until: String(localMidnight(today)), access_token: tok.access_token,
     })}`);

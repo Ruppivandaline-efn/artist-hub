@@ -135,3 +135,31 @@ test('Fehler einer Plattform blockiert die anderen nicht', async () => {
   assert.equal(r.soundcloud.ok, true);
   assert.equal(r.tiktok.linked, false);
 });
+
+test('Instagram Unified Login: Facebook-Dialog mit config_id, System-User-Token, Abruf über graph.facebook.com', async () => {
+  const env = { ...ENV(), IG_CONFIG_ID: 'cfg42' };
+  const orig = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url); seen.push(u.host + u.pathname);
+    if (u.host === 'graph.facebook.com' && u.pathname.endsWith('/oauth/access_token')) return res({ access_token: 'suat', token_type: 'bearer' });
+    if (u.pathname.endsWith('/me/assigned_instagram_accounts')) return res({ data: [{ id: '1789', username: 'ruppi' }] });
+    if (u.host === 'graph.facebook.com' && u.pathname.endsWith('/1789')) return res({ username: 'ruppi', followers_count: 2300 });
+    if (u.host === 'graph.facebook.com' && u.pathname.endsWith('/1789/insights')) return res({ data: [{ name: 'views', total_value: { value: 777 } }] });
+    return orig(url, init);
+  };
+  const start = await call(env, '/auth/instagram/start?key=test-key-123');
+  const loc = new URL(start.headers.get('location'));
+  assert.equal(loc.host, 'www.facebook.com');
+  assert.equal(loc.searchParams.get('config_id'), 'cfg42');
+  const cb = await call(env, `/auth/instagram/callback?code=c&state=${loc.searchParams.get('state')}`);
+  const text = await cb.text();
+  globalThis.fetch = orig;
+  assert.equal(cb.status, 200, text);
+  const tok = JSON.parse(await env.HUB.get('tokens:instagram'));
+  assert.equal(tok.mode, 'unified'); assert.equal(tok.ig_id, '1789');
+  const data = JSON.parse(await env.HUB.get('data'));
+  assert.equal(data.entries[`instagram|followers|${localDate()}`], 2300);
+  assert.equal(data.entries[`instagram|views|${localDate(Date.now(), -1)}`], 777);
+  assert.ok(!seen.some((h) => h.startsWith('graph.instagram.com')));
+});

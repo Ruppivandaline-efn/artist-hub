@@ -33,11 +33,23 @@ Redirect-URIs (exakt so, mit deiner Worker-Adresse):
 | SoundCloud | `https://artist-hub-sync.<dein-name>.workers.dev/auth/soundcloud/callback` |
 
 ### Instagram (Creator-Konto)
-1. developers.facebook.com → **Meine Apps → App erstellen** → Anwendungsfall **„Instagram-Nachrichten und -Inhalte verwalten“ / Instagram API** → Typ Business.
-2. Unter **Instagram → API-Einrichtung mit Instagram-Login**: Business-Login einrichten, Redirect-URI eintragen.
-3. Dein Instagram-Konto als **Instagram-Tester** hinzufügen (App-Rollen) und die Einladung in der Instagram-App bestätigen (Einstellungen → Apps und Websites → Tester-Einladungen).
-4. Secrets im Worker: `IG_CLIENT_ID` = Instagram-App-ID, `IG_CLIENT_SECRET` = Instagram-App-Geheimschlüssel
-   (die *Instagram*-App-ID aus der API-Einrichtung, nicht die Facebook-App-ID oben links).
+Neue Meta-Apps (ab Okt. 2026) bekommen nur noch **„API setup with Unified login“**. Der Worker unterstützt das,
+wenn das Secret `IG_CONFIG_ID` gesetzt ist. (Hinweis: Diese Schritte beruhen auf Entwickler-Berichten, Metas Doku dazu ist dünn.)
+
+1. **Business-Portfolio** anlegen (business.facebook.com) und dein Instagram-Konto dort hinzufügen
+   (Einstellungen → Konten → Instagram-Konten).
+2. App mit Anwendungsfall „Messaging und Content auf Instagram verwalten“ → **API setup with Unified login**.
+3. **Neue Konfiguration erstellen**: Login-Variante „Allgemein“, Token „Systemnutzer-Zugriffstoken“,
+   Asset „Instagram-Konto“. Berechtigungen: `instagram_basic`, `instagram_manage_insights`, `business_management`.
+   Fehlen `instagram_manage_insights`/`business_management` im Editor: Produkt **Facebook Login for Business**
+   → **Konfigurationen** → dieselbe Konfiguration **bearbeiten** und dort hinzufügen.
+4. **Weiterleitungs-URL** registrieren: `https://<worker>/auth/instagram/callback`.
+5. Secrets im Worker:
+   - `IG_CLIENT_ID` = App-ID (App-Einstellungen → Allgemeines)
+   - `IG_CLIENT_SECRET` = App-Geheimcode (ebenda)
+   - `IG_CONFIG_ID` = ID der Konfiguration (Facebook Login for Business → Konfigurationen)
+
+Ältere Apps mit „API-Einrichtung mit Instagram-Login“: `IG_CONFIG_ID` weglassen, dann Instagram-App-ID/-Geheimcode verwenden.
 
 ### TikTok
 1. developers.tiktok.com → **Manage apps → Connect an app**.
