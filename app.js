@@ -577,6 +577,67 @@ function download(name, text, type) {
 }
 
 // ---------------------------------------------------------------------------
+// Sync mit dem Cloudflare-Worker
+// ---------------------------------------------------------------------------
+const SYNC_KEY = 'artist-hub:sync';
+const SYNC_PROVIDERS = { instagram: 'Instagram', tiktok: 'TikTok', soundcloud: 'SoundCloud' };
+let syncCfg = { url: '', key: '', last: 0 };
+try { Object.assign(syncCfg, JSON.parse(localStorage.getItem(SYNC_KEY) || '{}')); } catch (e) { /* egal */ }
+const saveSync = () => { try { localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)); } catch (e) { /* egal */ } };
+const syncBase = () => syncCfg.url.trim().replace(/\/+$/, '');
+
+async function syncFetch(path, init = {}) {
+  const res = await fetch(syncBase() + path, { ...init, headers: { authorization: `Bearer ${syncCfg.key}`, ...(init.headers || {}) } });
+  if (res.status === 401) throw new Error('App-Schlüssel falsch');
+  if (!res.ok) throw new Error(`Worker antwortet mit ${res.status}`);
+  return res.json();
+}
+
+async function syncNow(manual) {
+  if (!syncBase() || !syncCfg.key) return;
+  const status = $('#sync-status');
+  if (manual && status) status.textContent = 'Rufe ab …';
+  try {
+    if (manual) await syncFetch('/sync', { method: 'POST' });
+    const data = await syncFetch('/data');
+    let n = 0;
+    for (const [k, v] of Object.entries(data.entries || {})) {
+      const [p, m, d] = k.split('|');
+      if (PLATFORMS[p]?.metrics[m] && /^\d{4}-\d{2}-\d{2}$/.test(d) && typeof v === 'number') { db.entries[k] = v; n++; }
+    }
+    syncCfg.last = Date.now(); saveSync();
+    invalidate(); save();
+    if (status) status.textContent = `${n} Werte synchronisiert (${new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}).`;
+    renderAll();
+    renderSyncStatus();
+  } catch (e) {
+    if (status) status.textContent = `Fehler: ${e.message}`;
+  }
+}
+
+async function renderSyncStatus() {
+  const box = $('#sync-providers');
+  if (!box) return;
+  if (!syncBase() || !syncCfg.key) { box.innerHTML = ''; return; }
+  try {
+    const st = await syncFetch('/status');
+    box.innerHTML = Object.entries(SYNC_PROVIDERS).map(([p, name]) => {
+      const s = st.providers?.[p] || {};
+      const last = s.last;
+      let info = !s.configured ? 'im Worker nicht eingerichtet'
+        : !s.linked ? 'nicht verbunden'
+        : last?.ok ? `verbunden${last.account ? ` als ${esc(last.account)}` : ''} · ${new Date(last.at).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}`
+        : `Fehler: ${esc(last?.error || 'unbekannt')}`;
+      const href = `${syncBase()}/auth/${p}/start?key=${encodeURIComponent(syncCfg.key)}`;
+      const btn = s.configured ? `<a class="btn" href="${esc(href)}">${s.linked ? 'Neu verbinden' : 'Verbinden'}</a>` : '';
+      return `<div class="map-row" style="grid-template-columns:1fr auto;margin-top:8px"><span><b>${name}</b><br><span class="meta" style="font-size:12px;color:var(--muted)">${info}</span></span>${btn}</div>`;
+    }).join('');
+  } catch (e) {
+    box.innerHTML = `<p class="sub">Status nicht abrufbar: ${esc(e.message)}</p>`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Navigation & Events
 // ---------------------------------------------------------------------------
 function showView(v) {
@@ -622,6 +683,17 @@ function init() {
     if (e.target.id === 'btn-csv-import') importCSV();
   });
   document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.chart')) hideTip(); });
+
+  $('#sync-url').value = syncCfg.url;
+  $('#sync-key').value = syncCfg.key;
+  $('#sync-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    syncCfg.url = $('#sync-url').value.trim();
+    syncCfg.key = $('#sync-key').value.trim();
+    saveSync();
+    syncNow(true);
+  });
+  $$('.tabbar button[data-view=data]').forEach((b) => b.addEventListener('click', renderSyncStatus));
 
   $('#btn-demo').addEventListener('click', makeDemo);
   $('#entry-platform').addEventListener('change', renderEntryFields);
@@ -682,6 +754,11 @@ function init() {
   window.matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', renderAll);
 
   showView(prefs.view);
+  if (prefs.view === 'data') renderSyncStatus();
+  // Beim Öffnen automatisch abrufen, wenn der letzte Abruf > 3 Std. her ist
+  const autoSync = () => { if (Date.now() - (syncCfg.last || 0) > 3 * 3600000) syncNow(false); };
+  autoSync();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) autoSync(); });
 
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});

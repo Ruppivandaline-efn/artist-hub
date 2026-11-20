@@ -74,6 +74,26 @@
     <!-- DATEN -->
     <section id="view-data" class="view" aria-label="Daten">
       <div class="card">
+        <h2>Automatischer Abruf</h2>
+        <p class="sub">Verbindung zu deinem Cloudflare-Worker. Er holt Instagram, TikTok und SoundCloud täglich ab. Spotify bleibt beim CSV-Import.</p>
+        <form id="sync-form">
+          <div class="row">
+            <label class="field">Worker-Adresse
+              <input type="url" id="sync-url" placeholder="https://artist-hub-sync.….workers.dev" autocomplete="off">
+            </label>
+            <label class="field">App-Schlüssel
+              <input type="password" id="sync-key" autocomplete="off">
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn primary" type="submit">Speichern &amp; abrufen</button>
+            <span class="status" id="sync-status" role="status"></span>
+          </div>
+        </form>
+        <div id="sync-providers"></div>
+      </div>
+
+      <div class="card">
         <h2>Werte eintragen</h2>
         <p class="sub">Bestandswerte (z.&nbsp;B. Follower) = aktueller Stand. Tageswerte (z.&nbsp;B. Streams) = Menge an genau diesem Tag.</p>
         <form id="entry-form">

@@ -1,5 +1,5 @@
 // Offline-Cache: App-Shell zuerst aus dem Netz, bei Offline aus dem Cache.
-const CACHE = 'artist-hub-v1';
+const CACHE = 'artist-hub-v2';
 const ASSETS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

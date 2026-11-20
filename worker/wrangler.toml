@@ -1,0 +1,16 @@
+name = "artist-hub-sync"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Täglich 04:17 UTC (05:17 bzw. 06:17 Uhr deutscher Zeit)
+[triggers]
+crons = ["17 4 * * *"]
+
+[vars]
+APP_ORIGIN = "https://ruppivandaline-efn.github.io"
+APP_URL = "https://ruppivandaline-efn.github.io/artist-hub/"
+
+# ID des KV-Namespace aus dem Cloudflare-Dashboard (Storage & Databases → KV) eintragen
+[[kv_namespaces]]
+binding = "HUB"
+id = "KV_NAMESPACE_ID_HIER_EINTRAGEN"

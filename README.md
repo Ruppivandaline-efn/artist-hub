@@ -31,14 +31,16 @@ Lokal testen: `python3 -m http.server` im Ordner `artist-hub/`, dann `http://loc
 > **Wichtig (iOS):** Safari löscht Website-Daten, die 7 Tage nicht benutzt wurden. Als Home-Bildschirm-App
 > gilt das nicht, trotzdem regelmäßig **Backup exportieren**.
 
-## Warum (noch) keine automatische Synchronisation?
+## Automatischer Abruf (Ordner `worker/`)
 
-| Plattform | API-Lage | Realistischer Weg |
+Ein Cloudflare Worker verbindet die Plattformen per OAuth, ruft täglich ab und speichert die Werte in KV.
+Die App holt sie beim Öffnen (Daten → Automatischer Abruf). Einrichtung: [`worker/SETUP.md`](worker/SETUP.md).
+
+| Plattform | API-Lage | Weg |
 |---|---|---|
-| Spotify for Artists | **keine öffentliche API** für S4A-Statistiken | CSV-Export aus S4A importieren |
-| SoundCloud | API-Zugang für neue Apps nur eingeschränkt | Werte manuell eintragen |
-| TikTok | Display API liefert Follower/Likes/Video-Views, braucht App-Registrierung + OAuth | Phase 2 mit Backend |
-| Instagram | Graph API nur für Business-/Creator-Konten mit verknüpfter Facebook-Seite | Phase 2 mit Backend |
+| Spotify for Artists | **keine öffentliche API** für S4A-Statistiken | CSV-Export importieren |
+| SoundCloud | Self-Service-API seit Mai 2026, **nur mit Artist Pro** | Worker |
+| TikTok | Login Kit + Display API (Follower, Likes, Videoaufrufe), Sandbox reicht fürs eigene Konto | Worker |
+| Instagram | Instagram API mit Instagram Login, Creator-/Business-Konto, **keine Facebook-Seite nötig** | Worker |
 
-OAuth-Secrets dürfen nicht in eine reine Client-App. Automatisches Abrufen braucht deshalb einen kleinen Server
-(z. B. Serverless-Funktion mit täglichem Cron), der die Werte holt und dieselbe Datenstruktur befüllt.
+OAuth-Secrets liegen nur im Worker, nie in der App. Tests: `cd worker && npm test`.

@@ -181,3 +181,4 @@ td button { border: 0; background: none; color: var(--muted); cursor: pointer; p
 
 .map-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 13px; }
 .map-row code { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.btn { text-decoration: none; color: var(--text); }
