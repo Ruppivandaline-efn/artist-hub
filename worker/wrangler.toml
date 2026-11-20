@@ -10,7 +10,7 @@ crons = ["17 4 * * *"]
 APP_ORIGIN = "https://ruppivandaline-efn.github.io"
 APP_URL = "https://ruppivandaline-efn.github.io/artist-hub/"
 
-# ID des KV-Namespace aus dem Cloudflare-Dashboard (Storage & Databases → KV) eintragen
+# KV-Namespace "artist-hub"
 [[kv_namespaces]]
 binding = "HUB"
-id = "KV_NAMESPACE_ID_HIER_EINTRAGEN"
+id = "0e91a6a0d7c849f0a004bf09bc973012"
