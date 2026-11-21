@@ -178,3 +178,28 @@ test('POST /data: App-Werte sichern, ungültige ablehnen, Löschungen übernehme
   assert.deepEqual(data.entries, { 'spotify|followers|2026-11-20': 667 });
   assert.equal((await call(env, '/data', { method: 'POST', headers: auth, body: 'kein json' })).status, 400);
 });
+
+test('POST /backfill: Instagram-Tageswerte der letzten Tage nachladen', async () => {
+  const env = { ...ENV(), IG_CONFIG_ID: 'cfg' };
+  await env.HUB.put('tokens:instagram', JSON.stringify({ mode: 'unified', access_token: 'suat', ig_id: '1789' }));
+  const orig = globalThis.fetch;
+  const days = [];
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/1789/insights')) {
+      days.push(u.searchParams.get('since'));
+      return res({ data: [{ name: 'views', total_value: { value: 100 + days.length } }, { name: 'total_interactions', total_value: { value: days.length } }] });
+    }
+    return orig(url, init);
+  };
+  const auth = { authorization: 'Bearer test-key-123' };
+  assert.equal((await call(env, '/backfill?provider=tiktok', { method: 'POST', headers: auth })).status, 400);
+  const r = await (await call(env, '/backfill?provider=instagram&days=5', { method: 'POST', headers: auth })).json();
+  globalThis.fetch = orig;
+  assert.equal(r.stored, 10);
+  assert.equal(new Set(days).size, 5);
+  const data = JSON.parse(await env.HUB.get('data'));
+  assert.equal(data.entries[`instagram|views|${localDate(Date.now(), -1)}`], 101);
+  assert.equal(data.entries[`instagram|interactions|${localDate(Date.now(), -5)}`], 5);
+  assert.equal(data.entries[`instagram|views|${localDate()}`], undefined); // heute nicht (Tag unvollständig)
+});

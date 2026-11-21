@@ -177,6 +177,36 @@ const instagram = {
     const r = await http(`https://graph.instagram.com/refresh_access_token?${new URLSearchParams({ grant_type: 'ig_refresh_token', access_token: tok.access_token })}`);
     return { ...tok, access_token: r.access_token, expires_at: Date.now() + (r.expires_in || 5184000) * 1000, refreshed_at: Date.now() };
   },
+  /** Tageswerte (Aufrufe, Interaktionen) der letzten `days` Tage nachladen. Follower nicht: rückwirkend nur Zugänge, keine Abgänge. */
+  async backfill(env, tok, days, now) {
+    const unified = tok.mode === 'unified';
+    const base = unified ? `https://graph.facebook.com/${IG_VER(env)}` : 'https://graph.instagram.com';
+    let id = unified ? tok.ig_id : null;
+    if (!id) {
+      const me = await http(`${base}/me?fields=user_id,id&access_token=${encodeURIComponent(tok.access_token)}`);
+      id = me.user_id || me.id;
+    }
+    const out = [], errors = [];
+    for (let i = 1; i <= days; i++) {
+      const day = localDate(now, -i), next = localDate(now, -i + 1);
+      try {
+        const ins = await http(`${base}/${id}/insights?${new URLSearchParams({
+          metric: 'views,total_interactions', period: 'day', metric_type: 'total_value',
+          since: String(localMidnight(day)), until: String(localMidnight(next)), access_token: tok.access_token,
+        })}`);
+        for (const row of ins.data || []) {
+          const v = row.total_value?.value;
+          if (typeof v !== 'number') continue;
+          if (row.name === 'views') out.push({ m: 'views', d: day, v });
+          if (row.name === 'total_interactions') out.push({ m: 'interactions', d: day, v });
+        }
+      } catch (e) {
+        errors.push({ day, error: String(e.message).slice(0, 160) });
+        if (errors.length >= 3 && !out.length) break; // grundsätzliches Problem – nicht weiter anfragen
+      }
+    }
+    return { values: out, errors };
+  },
   async fetch(env, tok, now) {
     const t = encodeURIComponent(tok.access_token);
     let base, id, me;
@@ -364,7 +394,7 @@ export default {
 
     if (path === '/') return new Response('Artist Hub Sync läuft.', { headers: { 'content-type': 'text/plain; charset=utf-8' } });
 
-    if (path === '/data' || path === '/status' || path === '/sync') {
+    if (path === '/data' || path === '/status' || path === '/sync' || path === '/backfill') {
       if (!authorized(req, env)) return json({ error: 'unauthorized' }, 401, c);
       if (path === '/data' && req.method === 'GET') return json(await getJSON(env, 'data', { entries: {} }), 200, c);
       if (path === '/data' && req.method === 'POST') {
@@ -437,6 +467,20 @@ export default {
         return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp, soundcloudApp, tiktokApp, tiktokViewsBaseline: meta.tiktokViews || null }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
+      if (path === '/backfill' && req.method === 'POST') {
+        const provider = url.searchParams.get('provider');
+        const days = Math.min(30, Math.max(1, parseInt(url.searchParams.get('days') || '30', 10) || 30));
+        if (provider !== 'instagram') return json({ error: 'Nachladen nur für Instagram möglich' }, 400, c);
+        const tok = await getJSON(env, 'tokens:instagram', null);
+        if (!tok) return json({ error: 'Instagram nicht verbunden' }, 400, c);
+        const fresh = await IMPL.instagram.refresh(env, tok);
+        if (fresh !== tok) await putJSON(env, 'tokens:instagram', fresh);
+        const { values, errors } = await IMPL.instagram.backfill(env, fresh, days, Date.now());
+        const data = await getJSON(env, 'data', { entries: {} });
+        for (const { m, d, v } of values) data.entries[`instagram|${m}|${d}`] = v;
+        await putJSON(env, 'data', data);
+        return json({ ok: true, days, stored: values.length, errors }, 200, c);
+      }
       return json({ error: 'method not allowed' }, 405, c);
     }
 
