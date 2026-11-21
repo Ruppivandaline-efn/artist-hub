@@ -130,6 +130,8 @@ async function igLookup(env, tok) {
       if (igId) diag.found = 'me/accounts';
     } catch (e) { diag.pagesError = String(e.message).slice(0, 200); }
   }
+  // Fallback: fest hinterlegte Instagram-Konto-ID (aus dem Business-Portfolio, keine geheime Angabe)
+  if (!igId && env.IG_USER_ID) { igId = env.IG_USER_ID; diag.found = 'IG_USER_ID'; }
   return { ...tok, ig_id: igId, diag };
 }
 const instagram = {
@@ -375,7 +377,7 @@ export default {
         // Nur ob ein Secret gesetzt ist (nie der Wert) – hilft bei Tippfehlern im Namen
         const names = ['APP_KEY', 'IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET', 'SC_CLIENT_ID', 'SC_CLIENT_SECRET'];
         const secrets = Object.fromEntries(names.map((n) => [n, !!(env[n] && String(env[n]).trim())]));
-        const unknown = Object.keys(env).filter((k) => !names.includes(k) && !['HUB', 'APP_ORIGIN', 'APP_URL', 'IG_GRAPH_VERSION'].includes(k));
+        const unknown = Object.keys(env).filter((k) => !names.includes(k) && !['HUB', 'APP_ORIGIN', 'APP_URL', 'IG_GRAPH_VERSION', 'IG_USER_ID'].includes(k));
         const fmt = (v) => (v ? { length: String(v).length, onlyDigits: /^\d+$/.test(String(v)) } : null);
         const formats = { IG_CLIENT_ID: fmt(env.IG_CLIENT_ID), IG_CONFIG_ID: fmt(env.IG_CONFIG_ID), rawHadWhitespace: ['IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID'].filter((n) => typeof rawEnv[n] === 'string' && rawEnv[n] !== rawEnv[n].trim()) };
         // Optional: prüft bei Meta, ob App-ID und Geheimcode zusammenpassen (App-Token), ohne Werte preiszugeben
