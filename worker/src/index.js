@@ -416,7 +416,7 @@ export default {
             tiktokApp = r.access_token ? { ok: true } : { ok: false, error: r.error_description || r.error || 'kein Token' };
           } catch (e) { tiktokApp = { ok: false, error: String(e.message).replace(env.TIKTOK_CLIENT_SECRET, '***') }; }
         }
-        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp, soundcloudApp, tiktokApp }, 200, c);
+        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp, soundcloudApp, tiktokApp, tiktokViewsBaseline: meta.tiktokViews || null }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
       return json({ error: 'method not allowed' }, 405, c);
