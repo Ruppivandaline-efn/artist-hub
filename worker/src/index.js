@@ -352,7 +352,21 @@ export default {
         const unknown = Object.keys(env).filter((k) => !names.includes(k) && !['HUB', 'APP_ORIGIN', 'APP_URL', 'IG_GRAPH_VERSION'].includes(k));
         const fmt = (v) => (v ? { length: String(v).length, onlyDigits: /^\d+$/.test(String(v)) } : null);
         const formats = { IG_CLIENT_ID: fmt(env.IG_CLIENT_ID), IG_CONFIG_ID: fmt(env.IG_CONFIG_ID), rawHadWhitespace: ['IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID'].filter((n) => typeof rawEnv[n] === 'string' && rawEnv[n] !== rawEnv[n].trim()) };
-        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats }, 200, c);
+        // Optional: prüft bei Meta, ob App-ID und Geheimcode zusammenpassen (App-Token), ohne Werte preiszugeben
+        let metaApp = null;
+        if (url.searchParams.get('check') === 'meta' && env.IG_CLIENT_ID && env.IG_CLIENT_SECRET) {
+          try {
+            const r = await http(`https://graph.facebook.com/${IG_VER(env)}/${env.IG_CLIENT_ID}?fields=name&access_token=${encodeURIComponent(env.IG_CLIENT_ID + '|' + env.IG_CLIENT_SECRET)}`);
+            metaApp = { ok: true, name: r.name };
+            if (env.IG_CONFIG_ID) {
+              try {
+                const cfg = await http(`https://graph.facebook.com/${IG_VER(env)}/${env.IG_CONFIG_ID}?access_token=${encodeURIComponent(env.IG_CLIENT_ID + '|' + env.IG_CLIENT_SECRET)}`);
+                metaApp.config = { ok: true, keys: Object.keys(cfg) };
+              } catch (e) { metaApp.config = { ok: false, error: String(e.message).replace(env.IG_CLIENT_SECRET, '***') }; }
+            }
+          } catch (e) { metaApp = { ok: false, error: String(e.message).replace(env.IG_CLIENT_SECRET, '***') }; }
+        }
+        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
       return json({ error: 'method not allowed' }, 405, c);
