@@ -329,7 +329,8 @@ export async function sync(env, only, now = Date.now()) {
 // HTTP
 // ---------------------------------------------------------------------------
 export default {
-  async fetch(req, env, ctx) {
+  async fetch(req, rawEnv, ctx) {
+    const env = normalizeEnv(rawEnv);
     const url = new URL(req.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
     const c = cors(env);
@@ -349,7 +350,9 @@ export default {
         const names = ['APP_KEY', 'IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET', 'SC_CLIENT_ID', 'SC_CLIENT_SECRET'];
         const secrets = Object.fromEntries(names.map((n) => [n, !!(env[n] && String(env[n]).trim())]));
         const unknown = Object.keys(env).filter((k) => !names.includes(k) && !['HUB', 'APP_ORIGIN', 'APP_URL', 'IG_GRAPH_VERSION'].includes(k));
-        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown }, 200, c);
+        const fmt = (v) => (v ? { length: String(v).length, onlyDigits: /^\d+$/.test(String(v)) } : null);
+        const formats = { IG_CLIENT_ID: fmt(env.IG_CLIENT_ID), IG_CONFIG_ID: fmt(env.IG_CONFIG_ID), rawHadWhitespace: ['IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID'].filter((n) => typeof rawEnv[n] === 'string' && rawEnv[n] !== rawEnv[n].trim()) };
+        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
       return json({ error: 'method not allowed' }, 405, c);
@@ -392,10 +395,17 @@ export default {
     return json({ error: 'not found' }, 404, c);
   },
 
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(sync(env));
+  async scheduled(event, rawEnv, ctx) {
+    ctx.waitUntil(sync(normalizeEnv(rawEnv)));
   },
 };
+
+/** Entfernt versehentliche Leerzeichen/Zeilenumbrüche aus Secrets und Variablen */
+export function normalizeEnv(env) {
+  const out = {};
+  for (const k of Object.keys(env)) out[k] = typeof env[k] === 'string' ? env[k].trim() : env[k];
+  return out;
+}
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
