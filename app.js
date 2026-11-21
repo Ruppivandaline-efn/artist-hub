@@ -385,6 +385,11 @@ function buildInsights(range) {
     if (!last) out.push(`Für <b>${PLATFORMS[p].name}</b> gibt es noch keine Daten.`);
     else if (dayNum(end) - dayNum(last) > 7) out.push(`<b>${PLATFORMS[p].name}</b> ist seit ${dayNum(end) - dayNum(last)} Tagen nicht aktualisiert.`);
   }
+  // Backup-Erinnerung
+  const lb = syncCfg.lastBackup;
+  if (Object.keys(db.entries).length && !db.demo && (!lb || Date.now() - lb > 14 * 86400000)) {
+    out.push(`<b>Backup</b> ${lb ? `zuletzt vor ${Math.floor((Date.now() - lb) / 86400000)} Tagen` : 'noch nie erstellt'} – unter „Daten → Backup in Google Drive“ sichern.`);
+  }
   // Streams pro Hörer (Spotify)
   const str = stats('spotify', 'streams', range), lis = stats('spotify', 'listeners', range);
   if (str?.value && lis?.value) out.push(`Spotify: ca. ${nfPct.format(str.value / range / lis.value)} Streams pro Hörer und Tag (grob, hängt von der Hörer-Definition ab).`);
@@ -531,14 +536,15 @@ function importCSV() {
   const maps = $$('#csv-mapping select').map((s) => [+s.dataset.col, s.value]).filter(([, m]) => m);
   if (!maps.length) { $('#csv-status').textContent = 'Keine Spalte zugeordnet.'; return; }
   let n = 0;
+  const up = {};
   for (const r of body) {
     const d = parseDate(r[dateCol]);
     if (!d) continue;
-    for (const [ci, m] of maps) { const v = parseNumber(r[ci]); if (v != null) { setValue(p, m, d, v); n++; } }
+    for (const [ci, m] of maps) { const v = parseNumber(r[ci]); if (v != null) { setValue(p, m, d, v); up[key(p, m, d)] = v; n++; } }
   }
-  if (db.demo) { /* echte Daten zusätzlich zu Demo-Daten → Hinweis bleibt */ }
   invalidate(); save(); renderAll();
   $('#csv-status').textContent = `${n} Werte importiert.`;
+  queueUpload(up);
 }
 
 function makeDemo() {
@@ -593,13 +599,48 @@ async function syncFetch(path, init = {}) {
   return res.json();
 }
 
+// Werte, die nur in der App entstehen (CSV, manuelle Einträge), werden im Worker gesichert.
+// Offline-fest: Änderungen landen erst in einer Warteschlange und werden beim nächsten Kontakt hochgeladen.
+const pending = () => (syncCfg.pending ||= { entries: {}, delete: [] });
+function queueUpload(entries = {}, del = []) {
+  const q = pending();
+  for (const [k, v] of Object.entries(entries)) { q.entries[k] = v; q.delete = q.delete.filter((x) => x !== k); }
+  for (const k of del) { delete q.entries[k]; if (!q.delete.includes(k)) q.delete.push(k); }
+  saveSync();
+  flushUpload();
+}
+let flushing = null;
+async function flushUpload() {
+  const q = pending();
+  if (!syncBase() || !syncCfg.key || (!Object.keys(q.entries).length && !q.delete.length)) return null;
+  if (flushing) return flushing;
+  const batch = { entries: { ...q.entries }, delete: [...q.delete] };
+  flushing = syncFetch('/data', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(batch) })
+    .then((r) => {
+      for (const k of Object.keys(batch.entries)) if (q.entries[k] === batch.entries[k]) delete q.entries[k];
+      q.delete = q.delete.filter((k) => !batch.delete.includes(k));
+      syncCfg.lastUpload = Date.now(); saveSync();
+      return r;
+    })
+    .catch(() => null) // bleibt in der Warteschlange
+    .finally(() => { flushing = null; });
+  return flushing;
+}
+
 async function syncNow(manual) {
   if (!syncBase() || !syncCfg.key) return;
   const status = $('#sync-status');
   if (manual && status) status.textContent = 'Rufe ab …';
   try {
+    await flushUpload();
     if (manual) await syncFetch('/sync', { method: 'POST' });
     const data = await syncFetch('/data');
+    // Einmalig: Werte, die schon vorher nur lokal lagen (z. B. Spotify-CSV), hochladen
+    if (!syncCfg.migrated && !db.demo) {
+      const localOnly = Object.fromEntries(Object.entries(db.entries).filter(([k]) => !(k in (data.entries || {}))));
+      syncCfg.migrated = true; saveSync();
+      if (Object.keys(localOnly).length) { queueUpload(localOnly); await flushing; }
+    }
     let n = 0;
     for (const [k, v] of Object.entries(data.entries || {})) {
       const [p, m, d] = k.split('|');
@@ -607,7 +648,9 @@ async function syncNow(manual) {
     }
     syncCfg.last = Date.now(); saveSync();
     invalidate(); save();
-    if (status) status.textContent = `${n} Werte synchronisiert (${new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}).`;
+    const waiting = Object.keys(pending().entries).length + pending().delete.length;
+    const hint = db.demo ? ' · Demo-Daten aktiv: lokale Werte werden erst nach „Gerät leeren“ gesichert' : waiting ? ` · ${waiting} warten auf Sicherung` : ' · alles gesichert';
+    if (status) status.textContent = `${n} Werte synchronisiert (${new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })})${hint}.`;
     renderAll();
     renderSyncStatus();
   } catch (e) {
@@ -676,8 +719,10 @@ function init() {
     if (del) {
       const p = $('#table-platform').value, d = del.dataset.del;
       if (confirm(`Alle ${PLATFORMS[p].name}-Werte vom ${fmtDate(d)} löschen?`)) {
-        for (const m in PLATFORMS[p].metrics) delete db.entries[key(p, m, d)];
+        const keys = Object.keys(PLATFORMS[p].metrics).map((m) => key(p, m, d));
+        for (const k of keys) delete db.entries[k];
         invalidate(); save(); renderTable();
+        queueUpload({}, keys);
       }
     }
     if (e.target.id === 'btn-csv-import') importCSV();
@@ -704,13 +749,15 @@ function init() {
     const p = $('#entry-platform').value, d = $('#entry-date').value;
     if (!d) return;
     let n = 0, bad = [];
+    const up = {};
     for (const input of $$('#entry-fields input')) {
       if (!input.value.trim()) continue;
       const v = parseNumber(input.value);
       if (v == null) { bad.push(PLATFORMS[p].metrics[input.name].label); continue; }
-      setValue(p, input.name, d, v); n++;
+      setValue(p, input.name, d, v); up[key(p, input.name, d)] = v; n++;
     }
     invalidate(); save();
+    queueUpload(up);
     $('#entry-status').textContent = bad.length ? `Ungültig: ${bad.join(', ')}` : n ? `${n} Werte gespeichert.` : 'Nichts eingetragen.';
     $('#table-platform').value = p;
     renderEntryFields(); renderTable();
@@ -724,9 +771,21 @@ function init() {
     const f = $('#csv-file').files[0]; if (f) handleCSV(await f.text());
   });
 
-  $('#btn-export').addEventListener('click', () => {
-    download(`artist-hub-backup-${today()}.json`, JSON.stringify({ app: 'artist-hub', version: 1, exported: new Date().toISOString(), ...db }, null, 1), 'application/json');
-    $('#backup-status').textContent = 'Backup erstellt.';
+  $('#btn-export').addEventListener('click', async () => {
+    const name = `artist-hub-backup-${today()}.json`;
+    const text = JSON.stringify({ app: 'artist-hub', version: 1, exported: new Date().toISOString(), ...db }, null, 1);
+    const file = new File([text], name, { type: 'application/json' });
+    const done = (msg) => { syncCfg.lastBackup = Date.now(); saveSync(); $('#backup-status').textContent = msg; };
+    try {
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Artist Hub Backup', text: name });
+        return done('Backup geteilt – in Google Drive gespeichert, wenn du Drive gewählt hast.');
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') { $('#backup-status').textContent = 'Abgebrochen.'; return; }
+    }
+    download(name, text, 'application/json');
+    done('Backup heruntergeladen (Ordner „Downloads“).');
   });
   $('#backup-file').addEventListener('change', async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -734,19 +793,22 @@ function init() {
       const data = JSON.parse(await f.text());
       if (!data.entries || typeof data.entries !== 'object') throw new Error('Kein gültiges Backup');
       let n = 0;
+      const up = {};
       for (const [k, v] of Object.entries(data.entries)) {
         const [p, m, d] = k.split('|');
-        if (PLATFORMS[p]?.metrics[m] && /^\d{4}-\d{2}-\d{2}$/.test(d) && typeof v === 'number') { db.entries[k] = v; n++; }
+        if (PLATFORMS[p]?.metrics[m] && /^\d{4}-\d{2}-\d{2}$/.test(d) && typeof v === 'number') { db.entries[k] = v; up[k] = v; n++; }
       }
       invalidate(); save(); renderAll();
       $('#backup-status').textContent = `${n} Werte wiederhergestellt.`;
+      if (!data.demo) queueUpload(up);
     } catch (err) { $('#backup-status').textContent = `Fehler: ${err.message}`; }
     e.target.value = '';
   });
   $('#btn-clear').addEventListener('click', () => {
-    if (!confirm('Wirklich ALLE Daten löschen? Das kann nicht rückgängig gemacht werden.')) return;
+    if (!confirm('Alle Daten auf diesem Gerät löschen? Die im Worker gesicherten Werte bleiben erhalten und kommen beim nächsten Abruf zurück.')) return;
     db = { entries: {}, demo: false }; invalidate(); save(); renderAll();
-    $('#backup-status').textContent = 'Alle Daten gelöscht.';
+    syncCfg.migrated = false; saveSync();
+    $('#backup-status').textContent = 'Daten auf diesem Gerät gelöscht. „Speichern & abrufen“ holt die gesicherten Werte zurück.';
   });
 
   let rt;
@@ -759,6 +821,8 @@ function init() {
   const autoSync = () => { if (Date.now() - (syncCfg.last || 0) > 3 * 3600000) syncNow(false); };
   autoSync();
   document.addEventListener('visibilitychange', () => { if (!document.hidden) autoSync(); });
+  window.addEventListener('online', flushUpload);
+  flushUpload();
 
   if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -163,3 +163,18 @@ test('Instagram Unified Login: Facebook-Dialog mit config_id, System-User-Token,
   assert.equal(data.entries[`instagram|views|${localDate(Date.now(), -1)}`], 777);
   assert.ok(!seen.some((h) => h.startsWith('graph.instagram.com')));
 });
+
+test('POST /data: App-Werte sichern, ungültige ablehnen, Löschungen übernehmen', async () => {
+  const env = ENV();
+  const auth = { authorization: 'Bearer test-key-123', 'content-type': 'application/json' };
+  assert.equal((await call(env, '/data', { method: 'POST', body: '{}' })).status, 401);
+  const r1 = await (await call(env, '/data', { method: 'POST', headers: auth, body: JSON.stringify({
+    entries: { 'spotify|streams|2026-11-20': 260, 'spotify|followers|2026-11-20': 667, 'evil|x|2026-11-20': 1, 'spotify|streams|gestern': 5, 'spotify|listeners|2026-11-20': 'viel' },
+  }) })).json();
+  assert.deepEqual([r1.stored, r1.rejected], [2, 3]);
+  const r2 = await (await call(env, '/data', { method: 'POST', headers: auth, body: JSON.stringify({ delete: ['spotify|streams|2026-11-20', 'nicht|da|2026-01-01'] }) })).json();
+  assert.equal(r2.deleted, 1);
+  const data = await (await call(env, '/data', { headers: auth })).json();
+  assert.deepEqual(data.entries, { 'spotify|followers|2026-11-20': 667 });
+  assert.equal((await call(env, '/data', { method: 'POST', headers: auth, body: 'kein json' })).status, 400);
+});

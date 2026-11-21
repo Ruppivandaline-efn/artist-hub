@@ -367,6 +367,24 @@ export default {
     if (path === '/data' || path === '/status' || path === '/sync') {
       if (!authorized(req, env)) return json({ error: 'unauthorized' }, 401, c);
       if (path === '/data' && req.method === 'GET') return json(await getJSON(env, 'data', { entries: {} }), 200, c);
+      if (path === '/data' && req.method === 'POST') {
+        // Werte aus der App sichern (CSV-Import, manuelle Einträge) und Löschungen übernehmen
+        let body;
+        try { body = await req.json(); } catch { return json({ error: 'invalid json' }, 400, c); }
+        const KEY = /^(spotify|soundcloud|tiktok|instagram)\|[a-z]{2,20}\|\d{4}-\d{2}-\d{2}$/;
+        const data = await getJSON(env, 'data', { entries: {} });
+        let stored = 0, deleted = 0, rejected = 0;
+        for (const [k, v] of Object.entries(body?.entries || {})) {
+          if (KEY.test(k) && typeof v === 'number' && isFinite(v)) { data.entries[k] = v; stored++; } else rejected++;
+        }
+        for (const k of Array.isArray(body?.delete) ? body.delete : []) {
+          if (typeof k === 'string' && KEY.test(k) && k in data.entries) { delete data.entries[k]; deleted++; }
+        }
+        if (Object.keys(data.entries).length > 200000) return json({ error: 'zu viele Werte' }, 413, c);
+        data.uploaded = new Date().toISOString();
+        await putJSON(env, 'data', data);
+        return json({ ok: true, stored, deleted, rejected, total: Object.keys(data.entries).length }, 200, c);
+      }
       if (path === '/status' && req.method === 'GET') {
         const meta = await getJSON(env, 'meta', { results: {} });
         const providers = {};

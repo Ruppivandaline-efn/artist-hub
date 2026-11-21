@@ -137,11 +137,11 @@
 
       <div class="card">
         <h2>Sicherung</h2>
-        <p class="sub">Deine Daten liegen nur auf diesem Gerät. Exportier regelmäßig ein Backup – Browser können Speicher löschen.</p>
+        <p class="sub">Mit verbundenem Worker werden importierte und eingetragene Werte automatisch dort gesichert. Zusätzlich: „Backup in Google Drive“ öffnet das Teilen-Menü – dort Drive wählen.</p>
         <div class="row">
-          <button class="btn" id="btn-export">Backup exportieren</button>
+          <button class="btn primary" id="btn-export">Backup in Google Drive</button>
           <label class="btn">Backup importieren<input type="file" id="backup-file" accept=".json,application/json" hidden></label>
-          <button class="btn danger" id="btn-clear">Alles löschen</button>
+          <button class="btn danger" id="btn-clear">Gerät leeren</button>
         </div>
         <span class="status" id="backup-status" role="status"></span>
       </div>
