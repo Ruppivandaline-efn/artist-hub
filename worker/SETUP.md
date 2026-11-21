@@ -49,6 +49,14 @@ wenn das Secret `IG_CONFIG_ID` gesetzt ist. (Hinweis: Diese Schritte beruhen auf
    - `IG_CLIENT_SECRET` = App-Geheimcode (ebenda)
    - `IG_CONFIG_ID` = ID der Konfiguration (Facebook Login for Business → Konfigurationen)
 
+**Stolpersteine (erprobt am 21.11.2026):**
+- In der Konfiguration erscheinen nur Berechtigungen, die vorher unter *Anwendungsfälle → Anpassen → Berechtigungen und Features*
+  hinzugefügt wurden. `instagram_basic` dort zuerst mit „+ Hinzufügen“ aktivieren.
+- `IG_CLIENT_ID`/`IG_CLIENT_SECRET` = **Meta-App-ID/-Geheimcode** (App-Einstellungen → Allgemeines), nicht die Instagram-App-ID.
+- Die Redirect-URI muss zusätzlich unter *Facebook Login for Business → Einstellungen → Gültige OAuth Redirect URIs* stehen.
+- Beim Bearbeiten der Secrets nicht versehentlich `APP_KEY` überschreiben.
+- Diagnose: `GET /status` (mit APP_KEY) zeigt erteilte Berechtigungen und gesetzte Secrets (ohne Werte).
+
 Ältere Apps mit „API-Einrichtung mit Instagram-Login“: `IG_CONFIG_ID` weglassen, dann Instagram-App-ID/-Geheimcode verwenden.
 
 ### TikTok
