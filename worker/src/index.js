@@ -99,6 +99,39 @@ const form = (obj) => ({ method: 'POST', headers: { 'content-type': 'application
 //    liefert ein System-User-Token ohne Ablauf; Aufrufe über graph.facebook.com.
 //  - "legacy": Instagram Login (instagram.com/oauth), für ältere Apps.
 const IG_VER = (env) => env.IG_GRAPH_VERSION || 'v25.0';
+
+/** Sucht die Instagram-Konto-ID für ein Unified-Login-Token und speichert Diagnosedaten (ohne Token) */
+async function igLookup(env, tok) {
+  const base = `https://graph.facebook.com/${IG_VER(env)}`;
+  const t = encodeURIComponent(tok.access_token);
+  const diag = { at: new Date().toISOString() };
+  let igId = '';
+  try {
+    const dbg = await http(`${base}/debug_token?input_token=${t}&access_token=${encodeURIComponent(env.IG_CLIENT_ID + '|' + env.IG_CLIENT_SECRET)}`);
+    const d = dbg.data || {};
+    diag.type = d.type; diag.valid = d.is_valid; diag.scopes = d.scopes || [];
+    diag.granular = (d.granular_scopes || []).map((g) => ({ scope: g.scope, targets: (g.target_ids || []).length }));
+    // Bei instagram_* enthalten target_ids die Instagram-Konto-IDs
+    const g = (d.granular_scopes || []).find((x) => /^instagram_/.test(x.scope) && x.target_ids?.length);
+    if (g) { igId = String(g.target_ids[0]); diag.found = 'granular_scopes'; }
+  } catch (e) { diag.debugError = String(e.message).slice(0, 200); }
+  if (!igId) {
+    try {
+      const a = await http(`${base}/me/assigned_instagram_accounts?fields=id,username&access_token=${t}`);
+      diag.assigned = (a.data || []).length;
+      if (a.data?.[0]?.id) { igId = a.data[0].id; diag.found = 'assigned_instagram_accounts'; }
+    } catch (e) { diag.assignedError = String(e.message).slice(0, 200); }
+  }
+  if (!igId) {
+    try {
+      const pages = await http(`${base}/me/accounts?fields=instagram_business_account&access_token=${t}`);
+      diag.pages = (pages.data || []).length;
+      igId = (pages.data || []).map((p) => p.instagram_business_account?.id).find(Boolean) || '';
+      if (igId) diag.found = 'me/accounts';
+    } catch (e) { diag.pagesError = String(e.message).slice(0, 200); }
+  }
+  return { ...tok, ig_id: igId, diag };
+}
 const instagram = {
   configured: (env) => !!(env.IG_CLIENT_ID && env.IG_CLIENT_SECRET),
   authUrl(env, redirect, state) {
@@ -123,20 +156,9 @@ const instagram = {
       const r = await http(`${base}/oauth/access_token?${new URLSearchParams({
         client_id: env.IG_CLIENT_ID, client_secret: env.IG_CLIENT_SECRET, redirect_uri: redirect, code,
       })}`);
-      const t = encodeURIComponent(r.access_token);
-      let igId = '';
-      try {
-        const a = await http(`${base}/me/assigned_instagram_accounts?fields=id,username&access_token=${t}`);
-        igId = a.data?.[0]?.id || '';
-      } catch (e) { /* Fallback unten */ }
-      if (!igId) {
-        try {
-          const pages = await http(`${base}/me/accounts?fields=instagram_business_account&access_token=${t}`);
-          igId = (pages.data || []).map((p) => p.instagram_business_account?.id).find(Boolean) || '';
-        } catch (e) { /* egal */ }
-      }
-      if (!igId) throw new Error('Kein Instagram-Konto im Token gefunden. Prüfe: Konto im Business-Portfolio, Berechtigungen business_management + instagram_basic in der Konfiguration.');
-      return { mode: 'unified', access_token: r.access_token, ig_id: igId, expires_at: r.expires_in ? Date.now() + r.expires_in * 1000 : null };
+      // Token immer behalten, auch wenn das Instagram-Konto noch nicht gefunden wird – so lässt sich der Fehler analysieren
+      const tok = { mode: 'unified', access_token: r.access_token, ig_id: '', expires_at: r.expires_in ? Date.now() + r.expires_in * 1000 : null };
+      return igLookup(env, tok);
     }
     const short = await http('https://api.instagram.com/oauth/access_token', form({
       client_id: env.IG_CLIENT_ID, client_secret: env.IG_CLIENT_SECRET, grant_type: 'authorization_code', redirect_uri: redirect, code,
@@ -147,7 +169,7 @@ const instagram = {
     return { mode: 'legacy', access_token: long.access_token, expires_at: Date.now() + (long.expires_in || 5184000) * 1000, refreshed_at: Date.now(), user_id: String(short.user_id || '') };
   },
   async refresh(env, tok) {
-    if (tok.mode === 'unified') return tok; // System-User-Token läuft nicht ab
+    if (tok.mode === 'unified') return tok.ig_id ? tok : igLookup(env, tok); // System-User-Token läuft nicht ab
     // Langzeit-Token gilt 60 Tage; wöchentlich verlängern
     if (Date.now() - (tok.refreshed_at || 0) < 7 * 86400000) return tok;
     const r = await http(`https://graph.instagram.com/refresh_access_token?${new URLSearchParams({ grant_type: 'ig_refresh_token', access_token: tok.access_token })}`);
@@ -159,6 +181,7 @@ const instagram = {
     if (tok.mode === 'unified') {
       base = `https://graph.facebook.com/${IG_VER(env)}`;
       id = tok.ig_id;
+      if (!id) throw new Error('Kein Instagram-Konto im Token. Erteilte Berechtigungen: ' + ((tok.diag?.scopes || []).join(', ') || 'unbekannt') + '. Benötigt: instagram_basic, instagram_manage_insights, business_management – dann neu verbinden.');
       me = await http(`${base}/${id}?fields=username,followers_count&access_token=${t}`);
     } else {
       base = 'https://graph.instagram.com';
@@ -345,7 +368,10 @@ export default {
       if (path === '/status' && req.method === 'GET') {
         const meta = await getJSON(env, 'meta', { results: {} });
         const providers = {};
-        for (const p of PROVIDERS) providers[p] = { configured: IMPL[p].configured(env), linked: !!(await env.HUB.get(`tokens:${p}`)), last: meta.results[p] || null };
+        for (const p of PROVIDERS) {
+          const tok = await getJSON(env, `tokens:${p}`, null);
+          providers[p] = { configured: IMPL[p].configured(env), linked: !!tok, last: meta.results[p] || null, ...(tok?.diag ? { diag: tok.diag } : {}) };
+        }
         // Nur ob ein Secret gesetzt ist (nie der Wert) – hilft bei Tippfehlern im Namen
         const names = ['APP_KEY', 'IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET', 'SC_CLIENT_ID', 'SC_CLIENT_SECRET'];
         const secrets = Object.fromEntries(names.map((n) => [n, !!(env[n] && String(env[n]).trim())]));
