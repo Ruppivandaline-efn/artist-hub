@@ -11,7 +11,7 @@ const PLATFORMS = {
     name: 'Spotify', color: '--spotify', plays: 'streams',
     metrics: {
       followers: { label: 'Follower', kind: 'stock' },
-      listeners: { label: 'Hörer', kind: 'stock', hint: 'Wert so, wie S4A ihn zeigt (Tages- oder Monatshörer) – nicht mischen' },
+      listeners: { label: 'Hörer', kind: 'stock', noDelta: true, hint: 'Wert so, wie S4A ihn zeigt (Tages- oder Monatshörer) – nicht mischen' },
       streams: { label: 'Streams', kind: 'flow' },
     },
   },
@@ -408,13 +408,31 @@ function renderPlatforms() {
     const label = def.kind === 'flow' ? `${def.label} (${range} T)` : def.label;
     return `<div class="kpi"><div class="k">${esc(label)}</div><div class="v">${st ? fmt(st.value) : '–'}</div><div class="d">${st ? deltaHTML(st.delta, st.pct) : '<span class="meta">keine Daten</span>'}</div></div>`;
   }).join('')}</div>`;
-  html += metrics.map(([m, def]) => `<div class="card"><h2>${esc(def.label)}</h2><p class="sub">${def.kind === 'flow' ? 'Tageswerte' : 'Bestand im Zeitverlauf'}${def.hint ? ' · ' + esc(def.hint) : ''}</p><div class="chart" data-m="${m}"></div></div>`).join('');
+  const withDelta = (def) => def.kind === 'stock' && !def.noDelta;
+  html += metrics.map(([m, def]) => `<div class="card"><h2>${esc(def.label)}</h2><p class="sub">${def.kind === 'flow' ? 'Tageswerte' : 'Bestand im Zeitverlauf'}${def.hint ? ' · ' + esc(def.hint) : ''}</p><div class="chart" data-m="${m}"></div>${
+    withDelta(def) ? `<p class="sub" style="margin:14px 0 4px"><b style="color:var(--text)">Zuwachs pro Tag</b> · Differenz zum Vortag</p><div class="chart" data-m="${m}" data-delta="1"></div>` : ''}</div>`).join('');
   const last = lastDate(p);
   html += `<p class="sub" style="text-align:center">${last ? `Letzter Eintrag: ${fmtDate(last)}` : 'Noch keine Daten.'} <a href="#" data-goto="data" style="color:var(--accent)">Werte eintragen</a></p>`;
   $('#platform-detail').innerHTML = html;
   for (const [m, def] of metrics) {
-    const pts = series(p, m).filter((pt) => pt.d >= start && pt.d <= end);
-    lineChart($(`.chart[data-m="${m}"]`, $('#platform-detail')), [{ id: m, name: def.label, color: pColor(p), points: pts }], { start, end, height: 170, aria: `${P.name} ${def.label}` });
+    const all = series(p, m);
+    const pts = all.filter((pt) => pt.d >= start && pt.d <= end);
+    lineChart($(`.chart[data-m="${m}"]:not([data-delta])`, $('#platform-detail')), [{ id: m, name: def.label, color: pColor(p), points: pts }], { start, end, height: 170, aria: `${P.name} ${def.label}` });
+    if (!withDelta(def)) continue;
+    // Zuwachs nur zwischen direkt aufeinanderfolgenden Tagen – Lücken würden mehrere Tage zusammenfassen
+    const deltas = [];
+    for (let i = 1; i < all.length; i++) {
+      if (dayNum(all[i].d) - dayNum(all[i - 1].d) === 1 && all[i].d >= start && all[i].d <= end) deltas.push({ d: all[i].d, v: all[i].v - all[i - 1].v });
+    }
+    const el = $(`.chart[data-m="${m}"][data-delta]`, $('#platform-detail'));
+    if (!deltas.length) {
+      el.innerHTML = `<p class="sub" style="margin:0">${all.length < 2 ? 'Erscheint ab dem zweiten Tag mit Daten.' : 'Noch keine zwei aufeinanderfolgenden Tage im Zeitraum.'}</p>`;
+    } else {
+      lineChart(el, [{ id: m + '-d', name: `${def.label} pro Tag`, color: pColor(p), points: deltas }], {
+        start, end, height: 140, zeroLine: true, aria: `${P.name} ${def.label} Zuwachs pro Tag`,
+        yFmt: (v) => `${sign(v)}${Math.abs(v) >= 1000 ? fmt(v) : nfAxis.format(v)}`, tipFmt: (v) => `${sign(v)}${fmt(v)}`,
+      });
+    }
   }
 }
 
