@@ -47,9 +47,11 @@ function safeEqual(a, b) {
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
+// Toleriert versehentliche Leerzeichen/Zeilenumbrüche beim Einfügen des Secrets
+const appKey = (env) => (env.APP_KEY || '').trim();
 function authorized(req, env) {
   const h = req.headers.get('authorization') || '';
-  return !!env.APP_KEY && safeEqual(h.replace(/^Bearer\s+/i, ''), env.APP_KEY);
+  return !!appKey(env) && safeEqual(h.replace(/^(Bearer\s+)+/i, '').trim(), appKey(env));
 }
 function cors(env) {
   return {
@@ -357,7 +359,7 @@ export default {
       if (!impl.configured(env)) return html('Nicht eingerichtet', `<h1>${p} ist nicht eingerichtet</h1><p>Client-ID/Secret fehlen als Worker-Secrets.</p>`, 400);
 
       if (step === 'start') {
-        if (!env.APP_KEY || !safeEqual(url.searchParams.get('key') || '', env.APP_KEY)) return html('Kein Zugriff', '<h1>Kein Zugriff</h1><p>Falscher oder fehlender Schlüssel.</p>', 401);
+        if (!appKey(env) || !safeEqual((url.searchParams.get('key') || '').trim(), appKey(env))) return html('Kein Zugriff', '<h1>Kein Zugriff</h1><p>Falscher oder fehlender Schlüssel.</p>', 401);
         const state = randomString(24);
         const verifier = impl.pkce ? randomString(48) : null;
         await putJSON(env, `state:${state}`, { p, verifier }, { expirationTtl: 600 });
