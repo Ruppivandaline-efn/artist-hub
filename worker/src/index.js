@@ -394,7 +394,19 @@ export default {
             }
           } catch (e) { metaApp = { ok: false, error: String(e.message).replace(env.IG_CLIENT_SECRET, '***') }; }
         }
-        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp }, 200, c);
+        // Optional: prüft bei SoundCloud, ob Client ID und Secret gültig sind (Client-Credentials-Token, wird verworfen)
+        let soundcloudApp = null;
+        if (url.searchParams.get('check') === 'soundcloud' && env.SC_CLIENT_ID && env.SC_CLIENT_SECRET) {
+          try {
+            const r = await http('https://secure.soundcloud.com/oauth/token', {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded', authorization: 'Basic ' + btoa(env.SC_CLIENT_ID + ':' + env.SC_CLIENT_SECRET) },
+              body: 'grant_type=client_credentials',
+            });
+            soundcloudApp = { ok: !!r.access_token };
+          } catch (e) { soundcloudApp = { ok: false, error: String(e.message).replace(env.SC_CLIENT_SECRET, '***') }; }
+        }
+        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp, soundcloudApp }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
       return json({ error: 'method not allowed' }, 405, c);
