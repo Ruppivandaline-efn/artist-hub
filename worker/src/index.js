@@ -406,7 +406,17 @@ export default {
             soundcloudApp = { ok: !!r.access_token };
           } catch (e) { soundcloudApp = { ok: false, error: String(e.message).replace(env.SC_CLIENT_SECRET, '***') }; }
         }
-        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp, soundcloudApp }, 200, c);
+        // Optional: prüft bei TikTok, ob Client key und Secret gültig sind (Client-Access-Token, wird verworfen)
+        let tiktokApp = null;
+        if (url.searchParams.get('check') === 'tiktok' && env.TIKTOK_CLIENT_KEY && env.TIKTOK_CLIENT_SECRET) {
+          try {
+            const r = await http('https://open.tiktokapis.com/v2/oauth/token/', form({
+              client_key: env.TIKTOK_CLIENT_KEY, client_secret: env.TIKTOK_CLIENT_SECRET, grant_type: 'client_credentials',
+            }));
+            tiktokApp = r.access_token ? { ok: true } : { ok: false, error: r.error_description || r.error || 'kein Token' };
+          } catch (e) { tiktokApp = { ok: false, error: String(e.message).replace(env.TIKTOK_CLIENT_SECRET, '***') }; }
+        }
+        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown, formats, metaApp, soundcloudApp, tiktokApp }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
       return json({ error: 'method not allowed' }, 405, c);
