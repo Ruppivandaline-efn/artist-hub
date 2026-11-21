@@ -345,7 +345,11 @@ export default {
         const meta = await getJSON(env, 'meta', { results: {} });
         const providers = {};
         for (const p of PROVIDERS) providers[p] = { configured: IMPL[p].configured(env), linked: !!(await env.HUB.get(`tokens:${p}`)), last: meta.results[p] || null };
-        return json({ lastRun: meta.lastRun || null, providers }, 200, c);
+        // Nur ob ein Secret gesetzt ist (nie der Wert) – hilft bei Tippfehlern im Namen
+        const names = ['APP_KEY', 'IG_CLIENT_ID', 'IG_CLIENT_SECRET', 'IG_CONFIG_ID', 'TIKTOK_CLIENT_KEY', 'TIKTOK_CLIENT_SECRET', 'SC_CLIENT_ID', 'SC_CLIENT_SECRET'];
+        const secrets = Object.fromEntries(names.map((n) => [n, !!(env[n] && String(env[n]).trim())]));
+        const unknown = Object.keys(env).filter((k) => !names.includes(k) && !['HUB', 'APP_ORIGIN', 'APP_URL', 'IG_GRAPH_VERSION'].includes(k));
+        return json({ lastRun: meta.lastRun || null, providers, secrets, unknown }, 200, c);
       }
       if (path === '/sync' && req.method === 'POST') return json(await sync(env), 200, c);
       return json({ error: 'method not allowed' }, 405, c);
